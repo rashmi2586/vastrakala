@@ -8,6 +8,7 @@ import {
   RefreshControl,
   Dimensions,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -52,6 +53,7 @@ export default function HomeScreen() {
   const [newArrivals, setNewArrivals] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const fetchProducts = async () => {
     try {
@@ -79,20 +81,15 @@ export default function HomeScreen() {
   useEffect(() => {
     const init = async () => {
       await fetchProducts();
-      // If no products, seed them
-      if (products.length === 0) {
-        await seedProducts();
-      }
     };
     init();
   }, []);
 
-  // Refresh after initial load if still no products
   useEffect(() => {
     if (!loading && products.length === 0) {
       seedProducts();
     }
-  }, [loading]);
+  }, [loading, products.length]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -100,8 +97,14 @@ export default function HomeScreen() {
     setRefreshing(false);
   }, []);
 
+  const handleSearch = () => {
+    if (searchQuery.trim()) {
+      router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
+    }
+  };
+
   const formatPrice = (price: number) => {
-    return `₹${price.toLocaleString('en-IN')}`;
+    return `\u20b9${price.toLocaleString('en-IN')}`;
   };
 
   const categories = [
@@ -110,7 +113,7 @@ export default function HomeScreen() {
     { id: 'readymade_dresses', name: 'Readymade', icon: 'shirt-outline' },
   ];
 
-  const renderProductCard = (product: Product, index: number) => (
+  const renderProductCard = (product: Product) => (
     <TouchableOpacity
       key={product.id}
       style={styles.productCard}
@@ -182,9 +185,27 @@ export default function HomeScreen() {
             <Text style={styles.brandName}>VASTRAKALA</Text>
             <Text style={styles.tagline}>Ethnic Elegance</Text>
           </View>
-          <TouchableOpacity style={styles.searchButton}>
-            <Ionicons name="search" size={24} color={COLORS.text} />
-          </TouchableOpacity>
+        </View>
+
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <View style={styles.searchBar}>
+            <Ionicons name="search" size={20} color={COLORS.textLight} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search sarees, suits, dresses..."
+              placeholderTextColor={COLORS.textLight}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onSubmitEditing={handleSearch}
+              returnKeyType="search"
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <Ionicons name="close-circle" size={20} color={COLORS.textLight} />
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         {/* Hero Banner */}
@@ -231,7 +252,7 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.horizontalList}
             >
-              {featuredProducts.map((product, index) => renderProductCard(product, index))}
+              {featuredProducts.map((product) => renderProductCard(product))}
             </ScrollView>
           </View>
         )}
@@ -250,7 +271,7 @@ export default function HomeScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.horizontalList}
             >
-              {newArrivals.map((product, index) => renderProductCard(product, index))}
+              {newArrivals.map((product) => renderProductCard(product))}
             </ScrollView>
           </View>
         )}
@@ -264,7 +285,6 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Footer Padding */}
         <View style={{ height: 20 }} />
       </ScrollView>
     </SafeAreaView>
@@ -306,15 +326,29 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     marginTop: 2,
   },
-  searchButton: {
-    padding: 10,
+  searchContainer: {
+    paddingHorizontal: 20,
+    marginBottom: 16,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: COLORS.white,
     borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    color: COLORS.text,
+    marginLeft: 10,
+    marginRight: 10,
   },
   heroBanner: {
     marginHorizontal: 20,

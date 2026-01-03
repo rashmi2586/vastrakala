@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Query
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -9,6 +9,8 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 import uuid
 from datetime import datetime
+import hashlib
+import secrets
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -28,7 +30,7 @@ api_router = APIRouter(prefix="/api")
 class ProductVariant(BaseModel):
     color: str
     color_code: str
-    images: List[str] = []  # base64 images
+    images: List[str] = []
 
 class Product(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -36,11 +38,11 @@ class Product(BaseModel):
     description: str
     price: float
     original_price: Optional[float] = None
-    category: str  # sarees, dress_materials, readymade_dresses
+    category: str
     subcategory: Optional[str] = None
     sizes: List[str] = ["S", "M", "L", "XL"]
     variants: List[ProductVariant] = []
-    main_image: str = ""  # base64 image
+    main_image: str = ""
     fabric: Optional[str] = None
     occasion: Optional[str] = None
     is_featured: bool = False
@@ -64,6 +66,7 @@ class ProductCreate(BaseModel):
 
 class CartItem(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str = "guest"
     product_id: str
     product_name: str
     product_image: str
@@ -74,6 +77,7 @@ class CartItem(BaseModel):
     added_at: datetime = Field(default_factory=datetime.utcnow)
 
 class CartItemCreate(BaseModel):
+    user_id: str = "guest"
     product_id: str
     product_name: str
     product_image: str
@@ -85,23 +89,150 @@ class CartItemCreate(BaseModel):
 class CartItemUpdate(BaseModel):
     quantity: int
 
-# Product Routes
+# Wishlist Models
+class WishlistItem(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    product_id: str
+    added_at: datetime = Field(default_factory=datetime.utcnow)
+
+class WishlistItemCreate(BaseModel):
+    user_id: str
+    product_id: str
+
+# User Models
+class User(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    email: str
+    name: str
+    picture: Optional[str] = None
+    auth_provider: str = "google"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class GoogleAuthRequest(BaseModel):
+    email: str
+    name: str
+    picture: Optional[str] = None
+    google_id: str
+
+# Order Models
+class OrderItem(BaseModel):
+    product_id: str
+    product_name: str
+    price: float
+    size: str
+    color: str
+    quantity: int
+
+class Order(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    items: List[OrderItem]
+    subtotal: float
+    shipping: float
+    total: float
+    payment_id: Optional[str] = None
+    payment_status: str = "pending"  # pending, completed, failed
+    order_status: str = "pending"  # pending, confirmed, shipped, delivered
+    shipping_address: Optional[dict] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class CreateOrderRequest(BaseModel):
+    user_id: str
+    items: List[OrderItem]
+    subtotal: float
+    shipping: float
+    total: float
+    shipping_address: Optional[dict] = None
+
+class PaymentVerifyRequest(BaseModel):
+    order_id: str
+    payment_id: str
+    signature: str
+
+# Routes
 @api_router.get("/")
 async def root():
     return {"message": "Welcome to Vastrakala API"}
 
+# Product Routes with Search and Filters
 @api_router.get("/products", response_model=List[Product])
-async def get_products(category: Optional[str] = None, featured: Optional[bool] = None, new_arrival: Optional[bool] = None):
+async def get_products(
+    category: Optional[str] = None,
+    featured: Optional[bool] = None,
+    new_arrival: Optional[bool] = None,
+    search: Optional[str] = None,
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    fabric: Optional[str] = None,
+    occasion: Optional[str] = None,
+    sort_by: Optional[str] = None  # price_asc, price_desc, newest
+):
     query = {}
+    
     if category:
         query["category"] = category
     if featured is not None:
         query["is_featured"] = featured
     if new_arrival is not None:
         query["is_new_arrival"] = new_arrival
+    if fabric:
+        query["fabric"] = {"$regex": fabric, "$options": "i"}
+    if occasion:
+        query["occasion"] = {"$regex": occasion, "$options": "i"}
     
-    products = await db.products.find(query).to_list(100)
+    # Price filter
+    if min_price is not None or max_price is not None:
+        query["price"] = {}
+        if min_price is not None:
+            query["price"]["$gte"] = min_price
+        if max_price is not None:
+            query["price"]["$lte"] = max_price
+    
+    # Search in name and description
+    if search:
+        query["$or"] = [
+            {"name": {"$regex": search, "$options": "i"}},
+            {"description": {"$regex": search, "$options": "i"}},
+            {"fabric": {"$regex": search, "$options": "i"}},
+            {"occasion": {"$regex": search, "$options": "i"}}
+        ]
+    
+    # Sorting
+    sort_options = {}
+    if sort_by == "price_asc":
+        sort_options = [("price", 1)]
+    elif sort_by == "price_desc":
+        sort_options = [("price", -1)]
+    elif sort_by == "newest":
+        sort_options = [("created_at", -1)]
+    else:
+        sort_options = [("created_at", -1)]
+    
+    products = await db.products.find(query).sort(sort_options).to_list(100)
     return [Product(**product) for product in products]
+
+@api_router.get("/products/filters")
+async def get_filter_options():
+    """Get available filter options"""
+    fabrics = await db.products.distinct("fabric")
+    occasions = await db.products.distinct("occasion")
+    
+    # Get price range
+    pipeline = [
+        {"$group": {
+            "_id": None,
+            "min_price": {"$min": "$price"},
+            "max_price": {"$max": "$price"}
+        }}
+    ]
+    price_range = await db.products.aggregate(pipeline).to_list(1)
+    
+    return {
+        "fabrics": [f for f in fabrics if f],
+        "occasions": [o for o in occasions if o],
+        "price_range": price_range[0] if price_range else {"min_price": 0, "max_price": 50000}
+    }
 
 @api_router.get("/products/{product_id}", response_model=Product)
 async def get_product(product_id: str):
@@ -126,21 +257,20 @@ async def delete_product(product_id: str):
 
 # Cart Routes
 @api_router.get("/cart", response_model=List[CartItem])
-async def get_cart():
-    items = await db.cart.find().to_list(100)
+async def get_cart(user_id: str = "guest"):
+    items = await db.cart.find({"user_id": user_id}).to_list(100)
     return [CartItem(**item) for item in items]
 
 @api_router.post("/cart", response_model=CartItem)
 async def add_to_cart(item: CartItemCreate):
-    # Check if same product with same size and color exists
     existing = await db.cart.find_one({
+        "user_id": item.user_id,
         "product_id": item.product_id,
         "size": item.size,
         "color": item.color
     })
     
     if existing:
-        # Update quantity
         new_quantity = existing["quantity"] + item.quantity
         await db.cart.update_one(
             {"id": existing["id"]},
@@ -173,14 +303,166 @@ async def remove_from_cart(item_id: str):
     return {"message": "Item removed from cart"}
 
 @api_router.delete("/cart")
-async def clear_cart():
-    await db.cart.delete_many({})
+async def clear_cart(user_id: str = "guest"):
+    await db.cart.delete_many({"user_id": user_id})
     return {"message": "Cart cleared"}
+
+# Wishlist Routes
+@api_router.get("/wishlist", response_model=List[dict])
+async def get_wishlist(user_id: str):
+    wishlist_items = await db.wishlist.find({"user_id": user_id}).to_list(100)
+    
+    # Get product details for each wishlist item
+    result = []
+    for item in wishlist_items:
+        product = await db.products.find_one({"id": item["product_id"]})
+        if product:
+            result.append({
+                "wishlist_id": item["id"],
+                "product": Product(**product).dict(),
+                "added_at": item["added_at"]
+            })
+    
+    return result
+
+@api_router.post("/wishlist", response_model=WishlistItem)
+async def add_to_wishlist(item: WishlistItemCreate):
+    # Check if already in wishlist
+    existing = await db.wishlist.find_one({
+        "user_id": item.user_id,
+        "product_id": item.product_id
+    })
+    
+    if existing:
+        return WishlistItem(**existing)
+    
+    item_dict = item.dict()
+    item_obj = WishlistItem(**item_dict)
+    await db.wishlist.insert_one(item_obj.dict())
+    return item_obj
+
+@api_router.delete("/wishlist/{product_id}")
+async def remove_from_wishlist(product_id: str, user_id: str):
+    result = await db.wishlist.delete_one({
+        "user_id": user_id,
+        "product_id": product_id
+    })
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Wishlist item not found")
+    return {"message": "Item removed from wishlist"}
+
+@api_router.get("/wishlist/check/{product_id}")
+async def check_wishlist(product_id: str, user_id: str):
+    item = await db.wishlist.find_one({
+        "user_id": user_id,
+        "product_id": product_id
+    })
+    return {"in_wishlist": item is not None}
+
+# Auth Routes
+@api_router.post("/auth/google")
+async def google_auth(auth_data: GoogleAuthRequest):
+    """Handle Google OAuth login/signup"""
+    # Check if user exists
+    existing_user = await db.users.find_one({"email": auth_data.email})
+    
+    if existing_user:
+        return {
+            "user": User(**existing_user).dict(),
+            "is_new": False
+        }
+    
+    # Create new user
+    user = User(
+        email=auth_data.email,
+        name=auth_data.name,
+        picture=auth_data.picture,
+        auth_provider="google"
+    )
+    await db.users.insert_one(user.dict())
+    
+    return {
+        "user": user.dict(),
+        "is_new": True
+    }
+
+@api_router.get("/auth/user/{user_id}")
+async def get_user(user_id: str):
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return User(**user)
+
+# Order & Payment Routes (MOCK Razorpay)
+@api_router.post("/orders", response_model=Order)
+async def create_order(order_data: CreateOrderRequest):
+    """Create a new order"""
+    order = Order(
+        user_id=order_data.user_id,
+        items=order_data.items,
+        subtotal=order_data.subtotal,
+        shipping=order_data.shipping,
+        total=order_data.total,
+        shipping_address=order_data.shipping_address
+    )
+    await db.orders.insert_one(order.dict())
+    return order
+
+@api_router.post("/payment/create")
+async def create_payment(order_id: str, amount: float):
+    """MOCK: Create Razorpay order - Returns mock payment details"""
+    # In real implementation, this would call Razorpay API
+    mock_razorpay_order_id = f"order_{secrets.token_hex(8)}"
+    
+    return {
+        "razorpay_order_id": mock_razorpay_order_id,
+        "amount": int(amount * 100),  # Razorpay uses paise
+        "currency": "INR",
+        "key_id": "rzp_test_mock_key",  # Mock key
+        "order_id": order_id,
+        "mock_mode": True,
+        "message": "This is MOCK mode. Add real Razorpay keys for production."
+    }
+
+@api_router.post("/payment/verify")
+async def verify_payment(data: PaymentVerifyRequest):
+    """MOCK: Verify payment - Always succeeds in mock mode"""
+    # Update order status
+    await db.orders.update_one(
+        {"id": data.order_id},
+        {"$set": {
+            "payment_id": data.payment_id,
+            "payment_status": "completed",
+            "order_status": "confirmed"
+        }}
+    )
+    
+    # Clear user's cart
+    order = await db.orders.find_one({"id": data.order_id})
+    if order:
+        await db.cart.delete_many({"user_id": order["user_id"]})
+    
+    return {
+        "success": True,
+        "message": "Payment verified successfully (MOCK MODE)",
+        "order_id": data.order_id
+    }
+
+@api_router.get("/orders", response_model=List[Order])
+async def get_orders(user_id: str):
+    orders = await db.orders.find({"user_id": user_id}).sort("created_at", -1).to_list(50)
+    return [Order(**order) for order in orders]
+
+@api_router.get("/orders/{order_id}", response_model=Order)
+async def get_order(order_id: str):
+    order = await db.orders.find_one({"id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return Order(**order)
 
 # Seed sample products
 @api_router.post("/seed")
 async def seed_products():
-    # Check if products already exist
     count = await db.products.count_documents({})
     if count > 0:
         return {"message": f"Products already seeded. {count} products exist."}
@@ -408,7 +690,7 @@ async def seed_products():
     
     return {"message": f"Successfully seeded {len(sample_products)} products"}
 
-# Include the router in the main app
+# Include the router
 app.include_router(api_router)
 
 app.add_middleware(
@@ -419,7 +701,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'

@@ -1,14 +1,18 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Linking,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { useAuth } from '../src/context/AuthContext';
+import * as WebBrowser from 'expo-web-browser';
 
 const COLORS = {
   primary: '#8B1538',
@@ -18,14 +22,16 @@ const COLORS = {
   text: '#333333',
   textLight: '#666666',
   border: '#E0E0E0',
+  success: '#4CAF50',
+  error: '#F44336',
 };
 
 const menuItems = [
-  { id: 'orders', icon: 'receipt-outline', title: 'My Orders', subtitle: 'Track your orders' },
-  { id: 'wishlist', icon: 'heart-outline', title: 'Wishlist', subtitle: 'Your favorite items' },
-  { id: 'address', icon: 'location-outline', title: 'Addresses', subtitle: 'Manage delivery addresses' },
-  { id: 'payments', icon: 'card-outline', title: 'Payment Methods', subtitle: 'Saved cards & UPI' },
-  { id: 'notifications', icon: 'notifications-outline', title: 'Notifications', subtitle: 'Offers & updates' },
+  { id: 'orders', icon: 'receipt-outline', title: 'My Orders', subtitle: 'Track your orders', route: '/orders' },
+  { id: 'wishlist', icon: 'heart-outline', title: 'Wishlist', subtitle: 'Your favorite items', route: '/wishlist' },
+  { id: 'address', icon: 'location-outline', title: 'Addresses', subtitle: 'Manage delivery addresses', route: null },
+  { id: 'payments', icon: 'card-outline', title: 'Payment Methods', subtitle: 'Saved cards & UPI', route: null },
+  { id: 'notifications', icon: 'notifications-outline', title: 'Notifications', subtitle: 'Offers & updates', route: null },
 ];
 
 const supportItems = [
@@ -37,10 +43,58 @@ const supportItems = [
 ];
 
 export default function ProfileScreen() {
-  const handleMenuPress = (id: string) => {
-    // For MVP, show coming soon message
-    console.log(`Pressed: ${id}`);
+  const router = useRouter();
+  const { user, signInWithGoogle, signOut, isLoading } = useAuth();
+  const [signingIn, setSigningIn] = useState(false);
+
+  const handleGoogleSignIn = async () => {
+    setSigningIn(true);
+    try {
+      // For demo purposes, simulate Google sign-in
+      // In production, use expo-auth-session with actual Google OAuth
+      const mockGoogleData = {
+        email: `user${Date.now()}@gmail.com`,
+        name: 'Demo User',
+        picture: '',
+        google_id: `google_${Date.now()}`,
+      };
+      
+      await signInWithGoogle(mockGoogleData);
+      Alert.alert('Success', 'Signed in successfully!');
+    } catch (error) {
+      console.error('Sign in error:', error);
+      Alert.alert('Error', 'Failed to sign in. Please try again.');
+    } finally {
+      setSigningIn(false);
+    }
   };
+
+  const handleSignOut = () => {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign Out', style: 'destructive', onPress: signOut },
+      ]
+    );
+  };
+
+  const handleMenuPress = (item: typeof menuItems[0]) => {
+    if (item.route) {
+      router.push(item.route as any);
+    } else {
+      Alert.alert('Coming Soon', 'This feature will be available soon!');
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -48,21 +102,51 @@ export default function ProfileScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.avatarContainer}>
-            <Ionicons name="person" size={40} color={COLORS.white} />
+            {user?.picture ? (
+              <Ionicons name="person" size={40} color={COLORS.white} />
+            ) : (
+              <Ionicons name="person" size={40} color={COLORS.white} />
+            )}
           </View>
-          <Text style={styles.welcomeText}>Welcome to</Text>
-          <Text style={styles.brandName}>VASTRAKALA</Text>
-          <Text style={styles.tagline}>Your destination for ethnic elegance</Text>
+          {user ? (
+            <>
+              <Text style={styles.userName}>{user.name}</Text>
+              <Text style={styles.userEmail}>{user.email}</Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.welcomeText}>Welcome to</Text>
+              <Text style={styles.brandName}>VASTRAKALA</Text>
+              <Text style={styles.tagline}>Your destination for ethnic elegance</Text>
+            </>
+          )}
         </View>
 
-        {/* Guest Message */}
-        <View style={styles.guestCard}>
-          <Ionicons name="information-circle" size={24} color={COLORS.primary} />
-          <View style={styles.guestInfo}>
-            <Text style={styles.guestTitle}>You're browsing as guest</Text>
-            <Text style={styles.guestSubtitle}>Sign up for exclusive offers & easy checkout</Text>
+        {/* Auth Section */}
+        {!user ? (
+          <View style={styles.authSection}>
+            <TouchableOpacity
+              style={styles.googleButton}
+              onPress={handleGoogleSignIn}
+              disabled={signingIn}
+            >
+              {signingIn ? (
+                <ActivityIndicator color={COLORS.white} />
+              ) : (
+                <>
+                  <Ionicons name="logo-google" size={20} color={COLORS.white} />
+                  <Text style={styles.googleButtonText}>Sign in with Google</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            <Text style={styles.authNote}>Sign in for exclusive offers & easy checkout</Text>
           </View>
-        </View>
+        ) : (
+          <View style={styles.signedInBadge}>
+            <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
+            <Text style={styles.signedInText}>Signed in</Text>
+          </View>
+        )}
 
         {/* Account Menu */}
         <View style={styles.section}>
@@ -74,7 +158,7 @@ export default function ProfileScreen() {
                 styles.menuItem,
                 index === menuItems.length - 1 && styles.lastMenuItem,
               ]}
-              onPress={() => handleMenuPress(item.id)}
+              onPress={() => handleMenuPress(item)}
             >
               <View style={styles.menuIconContainer}>
                 <Ionicons name={item.icon as any} size={22} color={COLORS.primary} />
@@ -99,7 +183,7 @@ export default function ProfileScreen() {
                 styles.supportMenuItem,
                 index === supportItems.length - 1 && styles.lastMenuItem,
               ]}
-              onPress={() => handleMenuPress(item.id)}
+              onPress={() => Alert.alert('Coming Soon', 'This feature will be available soon!')}
             >
               <Ionicons name={item.icon as any} size={20} color={COLORS.textLight} />
               <Text style={styles.supportMenuTitle}>{item.title}</Text>
@@ -107,6 +191,14 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           ))}
         </View>
+
+        {/* Sign Out Button */}
+        {user && (
+          <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
+            <Ionicons name="log-out-outline" size={20} color={COLORS.error} />
+            <Text style={styles.signOutText}>Sign Out</Text>
+          </TouchableOpacity>
+        )}
 
         {/* Contact Info */}
         <View style={styles.contactSection}>
@@ -135,7 +227,7 @@ export default function ProfileScreen() {
         {/* App Version */}
         <View style={styles.versionContainer}>
           <Text style={styles.versionText}>Vastrakala v1.0.0</Text>
-          <Text style={styles.copyrightText}>Made with ❤️ in India</Text>
+          <Text style={styles.copyrightText}>Made with love in India</Text>
         </View>
 
         <View style={{ height: 30 }} />
@@ -147,6 +239,12 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
     backgroundColor: COLORS.background,
   },
   header: {
@@ -164,6 +262,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
+  userName: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
+  userEmail: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.8)',
+    marginTop: 4,
+  },
   welcomeText: {
     fontSize: 14,
     color: 'rgba(255,255,255,0.8)',
@@ -180,32 +288,42 @@ const styles = StyleSheet.create({
     color: COLORS.secondary,
     marginTop: 8,
   },
-  guestCard: {
+  authSection: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  googleButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
-    margin: 16,
-    padding: 16,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 25,
+    width: '100%',
+    justifyContent: 'center',
   },
-  guestInfo: {
-    marginLeft: 12,
-    flex: 1,
-  },
-  guestTitle: {
-    fontSize: 15,
+  googleButtonText: {
+    color: COLORS.white,
     fontWeight: '600',
-    color: COLORS.text,
+    fontSize: 16,
+    marginLeft: 10,
   },
-  guestSubtitle: {
+  authNote: {
     fontSize: 12,
     color: COLORS.textLight,
-    marginTop: 2,
+    marginTop: 12,
+  },
+  signedInBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    backgroundColor: COLORS.success + '15',
+  },
+  signedInText: {
+    color: COLORS.success,
+    fontWeight: '600',
+    marginLeft: 8,
   },
   section: {
     backgroundColor: COLORS.white,
@@ -269,6 +387,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.text,
     marginLeft: 12,
+  },
+  signOutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 16,
+    marginTop: 20,
+    paddingVertical: 14,
+    backgroundColor: COLORS.white,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.error,
+  },
+  signOutText: {
+    color: COLORS.error,
+    fontWeight: '600',
+    fontSize: 16,
+    marginLeft: 8,
   },
   contactSection: {
     alignItems: 'center',
