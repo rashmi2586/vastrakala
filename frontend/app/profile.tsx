@@ -230,6 +230,12 @@ export default function ProfileScreen() {
           <Text style={styles.copyrightText}>Made with love in India</Text>
         </View>
 
+        {/* Admin Access */}
+        <TouchableOpacity style={styles.adminButton} onPress={() => router.push('/admin')}>
+          <Ionicons name="settings-outline" size={18} color={COLORS.textLight} />
+          <Text style={styles.adminButtonText}>Admin Panel</Text>
+        </TouchableOpacity>
+
         <View style={{ height: 30 }} />
       </ScrollView>
     </SafeAreaView>
