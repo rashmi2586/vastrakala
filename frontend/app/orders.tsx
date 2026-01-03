@@ -198,8 +198,8 @@ export default function OrdersScreen() {
                   <Text style={styles.totalLabel}>Total Amount</Text>
                   <Text style={styles.totalValue}>{formatPrice(order.total)}</Text>
                 </View>
-                <TouchableOpacity style={styles.detailsButton}>
-                  <Text style={styles.detailsButtonText}>View Details</Text>
+                <TouchableOpacity style={styles.detailsButton} onPress={() => router.push(`/order/${order.id}`)}>
+                  <Text style={styles.detailsButtonText}>Track Order</Text>
                   <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
                 </TouchableOpacity>
               </View>
