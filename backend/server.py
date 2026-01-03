@@ -487,6 +487,95 @@ async def get_order(order_id: str):
         raise HTTPException(status_code=404, detail="Order not found")
     return Order(**order)
 
+# Order Tracking Routes
+@api_router.get("/orders/{order_id}/tracking")
+async def get_order_tracking(order_id: str):
+    """Get tracking history for an order"""
+    tracking = await db.order_tracking.find_one({"order_id": order_id})
+    if not tracking:
+        return {"order_id": order_id, "tracking": []}
+    return {"order_id": order_id, "tracking": tracking.get("tracking", [])}
+
+@api_router.post("/orders/{order_id}/tracking")
+async def update_order_tracking(order_id: str, update: OrderStatusUpdate):
+    """Add a new tracking update to an order"""
+    # Verify order exists
+    order = await db.orders.find_one({"id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Default messages for each status
+    status_messages = {
+        "pending": "Order placed successfully",
+        "confirmed": "Order confirmed and being processed",
+        "packed": "Order has been packed and ready for dispatch",
+        "shipped": "Order has been shipped",
+        "in_transit": "Order is in transit",
+        "out_for_delivery": "Order is out for delivery",
+        "delivered": "Order has been delivered successfully"
+    }
+    
+    new_tracking = {
+        "status": update.status,
+        "message": update.message or status_messages.get(update.status, f"Status updated to {update.status}"),
+        "timestamp": datetime.utcnow(),
+        "location": update.location
+    }
+    
+    # Update tracking collection
+    await db.order_tracking.update_one(
+        {"order_id": order_id},
+        {"$push": {"tracking": new_tracking}},
+        upsert=True
+    )
+    
+    # Update order status
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {"order_status": update.status}}
+    )
+    
+    return {"success": True, "tracking": new_tracking}
+
+@api_router.post("/orders/{order_id}/simulate-delivery")
+async def simulate_order_delivery(order_id: str):
+    """Simulate the full delivery process for testing"""
+    order = await db.orders.find_one({"id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Simulate delivery timeline
+    tracking_updates = [
+        {"status": "confirmed", "message": "Order confirmed and being processed", "location": "Warehouse"},
+        {"status": "packed", "message": "Order has been packed", "location": "Warehouse"},
+        {"status": "shipped", "message": "Order dispatched via courier", "location": "Shipping Hub"},
+        {"status": "in_transit", "message": "Package in transit", "location": "Distribution Center"},
+        {"status": "out_for_delivery", "message": "Out for delivery", "location": order.get("shipping_address", {}).get("city", "Your City")},
+        {"status": "delivered", "message": "Package delivered successfully", "location": order.get("shipping_address", {}).get("city", "Your City")}
+    ]
+    
+    # Add all tracking updates
+    for i, update in enumerate(tracking_updates):
+        tracking_entry = {
+            "status": update["status"],
+            "message": update["message"],
+            "timestamp": datetime.utcnow(),
+            "location": update["location"]
+        }
+        await db.order_tracking.update_one(
+            {"order_id": order_id},
+            {"$push": {"tracking": tracking_entry}},
+            upsert=True
+        )
+    
+    # Update final order status
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {"order_status": "delivered"}}
+    )
+    
+    return {"success": True, "message": "Delivery simulation complete", "final_status": "delivered"}
+
 # Seed sample products
 @api_router.post("/seed")
 async def seed_products():
