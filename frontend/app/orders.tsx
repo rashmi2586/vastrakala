@@ -390,6 +390,10 @@ const styles = StyleSheet.create({
   detailsButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: COLORS.primary + '10',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
   },
   detailsButtonText: {
     fontSize: 14,
