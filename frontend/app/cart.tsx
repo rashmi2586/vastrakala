@@ -12,7 +12,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import axios from 'axios';
+import { useCart } from '../src/context/CartContext';
+import { useAuth } from '../src/context/AuthContext';
 
 const COLORS = {
   primary: '#8B1538',
@@ -26,66 +27,19 @@ const COLORS = {
   error: '#F44336',
 };
 
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
-
-interface CartItem {
-  id: string;
-  product_id: string;
-  product_name: string;
-  product_image: string;
-  price: number;
-  size: string;
-  color: string;
-  quantity: number;
-}
-
 export default function CartScreen() {
   const router = useRouter();
-  const [cartItems, setCartItems] = useState<CartItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const { items, subtotal, isLoading, refreshCart, updateQuantity, removeItem, clearCart } = useCart();
   const [refreshing, setRefreshing] = useState(false);
-
-  const fetchCart = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/api/cart`);
-      setCartItems(response.data);
-    } catch (error) {
-      console.error('Error fetching cart:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchCart();
-  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchCart();
+    await refreshCart();
     setRefreshing(false);
-  }, []);
+  }, [refreshCart]);
 
-  const updateQuantity = async (itemId: string, newQuantity: number) => {
-    if (newQuantity < 1) {
-      removeItem(itemId);
-      return;
-    }
-
-    try {
-      await axios.put(`${API_URL}/api/cart/${itemId}`, { quantity: newQuantity });
-      setCartItems((prev) =>
-        prev.map((item) =>
-          item.id === itemId ? { ...item, quantity: newQuantity } : item
-        )
-      );
-    } catch (error) {
-      console.error('Error updating quantity:', error);
-      Alert.alert('Error', 'Failed to update quantity');
-    }
-  };
-
-  const removeItem = async (itemId: string) => {
+  const handleRemoveItem = (itemId: string) => {
     Alert.alert(
       'Remove Item',
       'Are you sure you want to remove this item from cart?',
@@ -94,21 +48,13 @@ export default function CartScreen() {
         {
           text: 'Remove',
           style: 'destructive',
-          onPress: async () => {
-            try {
-              await axios.delete(`${API_URL}/api/cart/${itemId}`);
-              setCartItems((prev) => prev.filter((item) => item.id !== itemId));
-            } catch (error) {
-              console.error('Error removing item:', error);
-              Alert.alert('Error', 'Failed to remove item');
-            }
-          },
+          onPress: () => removeItem(itemId),
         },
       ]
     );
   };
 
-  const clearCart = async () => {
+  const handleClearCart = () => {
     Alert.alert(
       'Clear Cart',
       'Are you sure you want to clear your entire cart?',
@@ -117,29 +63,35 @@ export default function CartScreen() {
         {
           text: 'Clear',
           style: 'destructive',
-          onPress: async () => {
-            try {
-              await axios.delete(`${API_URL}/api/cart`);
-              setCartItems([]);
-            } catch (error) {
-              console.error('Error clearing cart:', error);
-              Alert.alert('Error', 'Failed to clear cart');
-            }
-          },
+          onPress: clearCart,
         },
       ]
     );
   };
 
-  const formatPrice = (price: number) => {
-    return `₹${price.toLocaleString('en-IN')}`;
+  const handleCheckout = () => {
+    if (!user) {
+      Alert.alert(
+        'Sign In Required',
+        'Please sign in to proceed with checkout',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Sign In', onPress: () => router.push('/profile') },
+        ]
+      );
+      return;
+    }
+    router.push('/checkout');
   };
 
-  const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const formatPrice = (price: number) => {
+    return `\u20b9${price.toLocaleString('en-IN')}`;
+  };
+
   const shipping = subtotal > 2000 ? 0 : 99;
   const total = subtotal + shipping;
 
-  if (loading) {
+  if (isLoading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={COLORS.primary} />
@@ -152,14 +104,14 @@ export default function CartScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Shopping Cart</Text>
-        {cartItems.length > 0 && (
-          <TouchableOpacity onPress={clearCart}>
+        {items.length > 0 && (
+          <TouchableOpacity onPress={handleClearCart}>
             <Text style={styles.clearText}>Clear All</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {cartItems.length === 0 ? (
+      {items.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Ionicons name="cart-outline" size={80} color={COLORS.border} />
           <Text style={styles.emptyTitle}>Your cart is empty</Text>
@@ -180,7 +132,7 @@ export default function CartScreen() {
               <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[COLORS.primary]} />
             }
           >
-            {cartItems.map((item) => (
+            {items.map((item) => (
               <View key={item.id} style={styles.cartItem}>
                 <TouchableOpacity
                   style={styles.itemImageContainer}
@@ -225,7 +177,7 @@ export default function CartScreen() {
 
                 <TouchableOpacity
                   style={styles.removeButton}
-                  onPress={() => removeItem(item.id)}
+                  onPress={() => handleRemoveItem(item.id)}
                 >
                   <Ionicons name="trash-outline" size={20} color={COLORS.error} />
                 </TouchableOpacity>
@@ -248,17 +200,14 @@ export default function CartScreen() {
             </View>
             {subtotal < 2000 && subtotal > 0 && (
               <Text style={styles.freeShippingNote}>
-                Add ₹{(2000 - subtotal).toLocaleString('en-IN')} more for free shipping
+                Add \u20b9{(2000 - subtotal).toLocaleString('en-IN')} more for free shipping
               </Text>
             )}
             <View style={[styles.summaryRow, styles.totalRow]}>
               <Text style={styles.totalLabel}>Total</Text>
               <Text style={styles.totalValue}>{formatPrice(total)}</Text>
             </View>
-            <TouchableOpacity
-              style={styles.checkoutButton}
-              onPress={() => Alert.alert('Coming Soon', 'Checkout functionality will be available soon!')}
-            >
+            <TouchableOpacity style={styles.checkoutButton} onPress={handleCheckout}>
               <Text style={styles.checkoutButtonText}>Proceed to Checkout</Text>
               <Ionicons name="arrow-forward" size={20} color={COLORS.white} />
             </TouchableOpacity>

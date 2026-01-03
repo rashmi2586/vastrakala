@@ -13,6 +13,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import axios from 'axios';
+import { useAuth } from '../../src/context/AuthContext';
+import { useCart } from '../../src/context/CartContext';
 
 const { width } = Dimensions.get('window');
 
@@ -55,15 +57,22 @@ interface Product {
 export default function ProductDetailScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
+  const { user } = useAuth();
+  const { addToCart } = useCart();
   const [product, setProduct] = useState<Product | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedSize, setSelectedSize] = useState<string>('');
   const [selectedColor, setSelectedColor] = useState<ProductVariant | null>(null);
   const [addingToCart, setAddingToCart] = useState(false);
+  const [inWishlist, setInWishlist] = useState(false);
+  const [wishlistLoading, setWishlistLoading] = useState(false);
 
   useEffect(() => {
     fetchProduct();
-  }, [id]);
+    if (user) {
+      checkWishlist();
+    }
+  }, [id, user]);
 
   const fetchProduct = async () => {
     try {
@@ -83,7 +92,46 @@ export default function ProductDetailScreen() {
     }
   };
 
-  const addToCart = async () => {
+  const checkWishlist = async () => {
+    if (!user) return;
+    try {
+      const response = await axios.get(`${API_URL}/api/wishlist/check/${id}?user_id=${user.id}`);
+      setInWishlist(response.data.in_wishlist);
+    } catch (error) {
+      console.error('Error checking wishlist:', error);
+    }
+  };
+
+  const toggleWishlist = async () => {
+    if (!user) {
+      Alert.alert('Sign In Required', 'Please sign in to add items to wishlist', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign In', onPress: () => router.push('/profile') },
+      ]);
+      return;
+    }
+
+    setWishlistLoading(true);
+    try {
+      if (inWishlist) {
+        await axios.delete(`${API_URL}/api/wishlist/${id}?user_id=${user.id}`);
+        setInWishlist(false);
+      } else {
+        await axios.post(`${API_URL}/api/wishlist`, {
+          user_id: user.id,
+          product_id: id,
+        });
+        setInWishlist(true);
+      }
+    } catch (error) {
+      console.error('Error toggling wishlist:', error);
+      Alert.alert('Error', 'Failed to update wishlist');
+    } finally {
+      setWishlistLoading(false);
+    }
+  };
+
+  const handleAddToCart = async () => {
     if (!product) return;
 
     if (!selectedSize) {
@@ -97,7 +145,7 @@ export default function ProductDetailScreen() {
 
     setAddingToCart(true);
     try {
-      await axios.post(`${API_URL}/api/cart`, {
+      await addToCart({
         product_id: product.id,
         product_name: product.name,
         product_image: product.main_image,
@@ -119,7 +167,7 @@ export default function ProductDetailScreen() {
   };
 
   const formatPrice = (price: number) => {
-    return `₹${price.toLocaleString('en-IN')}`;
+    return `\u20b9${price.toLocaleString('en-IN')}`;
   };
 
   if (loading) {
@@ -153,8 +201,20 @@ export default function ProductDetailScreen() {
         <TouchableOpacity style={styles.headerButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color={COLORS.text} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.headerButton}>
-          <Ionicons name="heart-outline" size={24} color={COLORS.text} />
+        <TouchableOpacity
+          style={styles.headerButton}
+          onPress={toggleWishlist}
+          disabled={wishlistLoading}
+        >
+          {wishlistLoading ? (
+            <ActivityIndicator size="small" color={COLORS.primary} />
+          ) : (
+            <Ionicons
+              name={inWishlist ? 'heart' : 'heart-outline'}
+              size={24}
+              color={inWishlist ? COLORS.error : COLORS.text}
+            />
+          )}
         </TouchableOpacity>
       </View>
 
@@ -178,7 +238,7 @@ export default function ProductDetailScreen() {
         <View style={styles.infoContainer}>
           <Text style={styles.category}>
             {product.category.replace('_', ' ').toUpperCase()}
-            {product.subcategory && ` • ${product.subcategory.toUpperCase()}`}
+            {product.subcategory && ` \u2022 ${product.subcategory.toUpperCase()}`}
           </Text>
           <Text style={styles.productName}>{product.name}</Text>
 
@@ -293,7 +353,7 @@ export default function ProductDetailScreen() {
       <View style={styles.bottomBar}>
         <TouchableOpacity
           style={styles.addToCartButton}
-          onPress={addToCart}
+          onPress={handleAddToCart}
           disabled={addingToCart}
         >
           {addingToCart ? (
