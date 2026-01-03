@@ -107,6 +107,12 @@ export default function RootLayout() {
                 href: null,
               }}
             />
+            <Tabs.Screen
+              name="order/[id]"
+              options={{
+                href: null,
+              }}
+            />
           </Tabs>
         </SafeAreaProvider>
       </CartProvider>
