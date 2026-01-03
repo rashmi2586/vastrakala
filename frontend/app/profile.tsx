@@ -464,4 +464,21 @@ const styles = StyleSheet.create({
     color: COLORS.textLight,
     marginTop: 4,
   },
+  adminButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 16,
+    marginTop: 16,
+    paddingVertical: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderStyle: 'dashed',
+  },
+  adminButtonText: {
+    fontSize: 14,
+    color: COLORS.textLight,
+    marginLeft: 8,
+  },
 });
