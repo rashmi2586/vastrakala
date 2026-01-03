@@ -393,6 +393,18 @@ async def get_user(user_id: str):
         raise HTTPException(status_code=404, detail="User not found")
     return User(**user)
 
+# Order Tracking Model
+class OrderTracking(BaseModel):
+    status: str
+    message: str
+    timestamp: datetime
+    location: Optional[str] = None
+
+class OrderStatusUpdate(BaseModel):
+    status: str
+    message: Optional[str] = None
+    location: Optional[str] = None
+
 # Order & Payment Routes (MOCK Razorpay)
 @api_router.post("/orders", response_model=Order)
 async def create_order(order_data: CreateOrderRequest):
@@ -406,6 +418,21 @@ async def create_order(order_data: CreateOrderRequest):
         shipping_address=order_data.shipping_address
     )
     await db.orders.insert_one(order.dict())
+    
+    # Create initial tracking entry
+    tracking_entry = {
+        "order_id": order.id,
+        "tracking": [
+            {
+                "status": "pending",
+                "message": "Order placed successfully",
+                "timestamp": datetime.utcnow(),
+                "location": None
+            }
+        ]
+    }
+    await db.order_tracking.insert_one(tracking_entry)
+    
     return order
 
 @api_router.post("/payment/create")
